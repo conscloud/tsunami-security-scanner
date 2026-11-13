@@ -30,11 +30,8 @@ public final class PayloadSecretGenerator {
 
   private final SecureRandom payloadSecretRng;
 
-  // This method is public so that BlindExploitGenerator can use it
-  // TODO(b/205184738): Remove visiblity when BlindExploitGenerator is removed.
-  @SuppressWarnings("UnnecessarilyVisible")
   @Inject
-  public PayloadSecretGenerator(@PayloadSecretRng SecureRandom payloadSecretRng) {
+  PayloadSecretGenerator(@PayloadSecretRng SecureRandom payloadSecretRng) {
     this.payloadSecretRng = payloadSecretRng;
   }
 
@@ -44,11 +41,11 @@ public final class PayloadSecretGenerator {
     return BaseEncoding.base16().lowerCase().encode(randomBytes);
   }
 
-  public static Module getModule() {
-    return new Module();
+  public static PayloadSecretGeneratorModule getModule() {
+    return new PayloadSecretGeneratorModule();
   }
 
-  private static final class Module extends AbstractModule {
+  private static final class PayloadSecretGeneratorModule extends AbstractModule {
     @Provides
     @PayloadSecretRng
     @Singleton

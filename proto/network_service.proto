@@ -26,7 +26,7 @@ import "web_crawl.proto";
 option java_multiple_files = true;
 option java_outer_classname = "NetworkServiceProtos";
 option java_package = "com.google.tsunami.proto";
-option go_package = "github.com/google/tsunami-security-scanner/proto";
+option go_package = "github.com/google/tsunami-security-scanner/proto/go/network_service_go_proto";
 
 // General information about a network service running on a target.
 message NetworkService {
@@ -52,7 +52,15 @@ message NetworkService {
   // Context information about this network service.
   ServiceContext service_context = 7;
 
-  // TODO(magl): add ssl related information.
+  // The detected Common Platform Enumeration (CPE) name for service,
+  // in the uri binding representation, like: cpe:/a:openbsd:openssh:8.4p1
+  repeated string cpes = 8;
+
+  // List of supported SSL versions (e.g. TLSv1, SSLv3, ...) on the service.
+  repeated string supported_ssl_versions = 9;
+
+  // List of supported HTTP methods (e.g. POST, GET, ...) on the service.
+  repeated string supported_http_methods = 10;
 }
 
 // Context information about a specific network service.

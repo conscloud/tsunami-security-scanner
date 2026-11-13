@@ -27,15 +27,15 @@ public final class HttpClientCliOptions implements CliOption {
 
   @Parameter(
       names = "--http-client-trust-all-certificates",
+      arity = 1,
       description = "Whether the HTTP client should trust all certificates on HTTPS traffic.")
-  Boolean trustAllCertificates;
+  public Boolean trustAllCertificates;
 
   @Parameter(
       names = "--http-client-call-timeout-seconds",
       description =
-          "The timeout in seconds for complete HTTP calls. See"
-              + " https://square.github.io/okhttp/4.x/okhttp/okhttp3/-ok-http-client/-builder/call-timeout/"
-              + " for more details.")
+          "[Depreciated] Set to be the same as the timeout specified by"
+              + " --http-client-connect-timeout-seconds.")
   Integer callTimeoutSeconds;
 
   @Parameter(
@@ -49,18 +49,21 @@ public final class HttpClientCliOptions implements CliOption {
   @Parameter(
       names = "--http-client-read-timeout-seconds",
       description =
-          "The timeout in seconds for the read operations for HTTP connections. See"
-              + " https://square.github.io/okhttp/4.x/okhttp/okhttp3/-ok-http-client/-builder/read-timeout/"
-              + " for more details.")
+          "[Depreciated] Set to be the same as the timeout specified by"
+              + " --http-client-connect-timeout-seconds")
   Integer readTimeoutSeconds;
 
   @Parameter(
       names = "--http-client-write-timeout-seconds",
       description =
-          "The timeout in seconds for the write operations for HTTP connections. See"
-              + " https://square.github.io/okhttp/4.x/okhttp/okhttp3/-ok-http-client/-builder/write-timeout/"
-              + " for more details.")
+          "[Depreciated] Set to be the same as the timeout specified by"
+              + " --http-client-connect-timeout-seconds.")
   Integer writeTimeoutSeconds;
+
+  @Parameter(
+      names = "--http-client-user-agent",
+      description = "User-Agent to use in HTTP requests.")
+  public String userAgent = HttpClient.TSUNAMI_USER_AGENT;
 
   @Override
   public void validate() {

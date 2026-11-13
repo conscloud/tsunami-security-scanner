@@ -16,12 +16,23 @@
 package com.google.tsunami.common.data;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.extensions.proto.ProtoTruth.assertThat;
 import static com.google.tsunami.common.data.NetworkEndpointUtils.forIpAndPort;
 
+import com.google.tsunami.proto.AddressFamily;
+import com.google.tsunami.proto.Hostname;
+import com.google.tsunami.proto.IpAddress;
+import com.google.tsunami.proto.NetworkEndpoint;
 import com.google.tsunami.proto.NetworkService;
+import com.google.tsunami.proto.Port;
 import com.google.tsunami.proto.ServiceContext;
 import com.google.tsunami.proto.Software;
+import com.google.tsunami.proto.TransportProtocol;
 import com.google.tsunami.proto.WebServiceContext;
+import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.URL;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -95,6 +106,17 @@ public final class NetworkServiceUtilsTest {
   }
 
   @Test
+  public void isWebService_whenHasAtLeastOneHttpMethod_returnsTrue() {
+    assertThat(
+            NetworkServiceUtils.isWebService(
+                NetworkService.newBuilder()
+                    .setServiceName("irrelevantService")
+                    .addSupportedHttpMethods("IrrelevantMethodName")
+                    .build()))
+        .isTrue();
+  }
+
+  @Test
   public void isWebService_whenNonWebService_returnsFalse() {
     assertThat(
             NetworkServiceUtils.isWebService(
@@ -143,6 +165,50 @@ public final class NetworkServiceUtilsTest {
   }
 
   @Test
+  public void isPlainHttp_whenHttpServiceButHasSslVersions_returnsFalse() {
+    assertThat(
+            NetworkServiceUtils.isPlainHttp(
+                NetworkService.newBuilder()
+                    .setServiceName("http")
+                    .addSupportedSslVersions("SSLV3")
+                    .build()))
+        .isFalse();
+  }
+
+  @Test
+  public void isPlainHttp_whenNonHttpServiceButHasSslVersions_returnsFalse() {
+    assertThat(
+            NetworkServiceUtils.isPlainHttp(
+                NetworkService.newBuilder()
+                    .setServiceName("ssh")
+                    .addSupportedSslVersions("SSLV3")
+                    .build()))
+        .isFalse();
+  }
+
+  @Test
+  public void isPlainHttp_whenHttpServiceFromHttpMethodsWithoutSslVersions_returnsTrue() {
+    assertThat(
+            NetworkServiceUtils.isPlainHttp(
+                NetworkService.newBuilder()
+                    .setServiceName("ssh")
+                    .addSupportedHttpMethods("GET")
+                    .build()))
+        .isTrue();
+  }
+
+  @Test
+  public void isPlainHttp_whenHttpServiceWithSslVersions_returnsFalse() {
+    assertThat(
+            NetworkServiceUtils.isPlainHttp(
+                NetworkService.newBuilder()
+                    .setServiceName("http")
+                    .addSupportedSslVersions("SSLV3")
+                    .build()))
+        .isFalse();
+  }
+
+  @Test
   public void getServiceName_whenNonWebService_returnsServiceName() {
     assertThat(
             NetworkServiceUtils.getServiceName(
@@ -174,6 +240,34 @@ public final class NetworkServiceUtilsTest {
                     .setSoftware(Software.newBuilder().setName("WordPress"))
                     .build()))
         .isEqualTo("wordpress");
+  }
+
+  @Test
+  public void getWebServiceName_whenWebServiceWithSoftware_returnsWebServiceName() {
+    assertThat(
+            NetworkServiceUtils.getWebServiceName(
+                NetworkService.newBuilder()
+                    .setNetworkEndpoint(forIpAndPort("127.0.0.1", 8080))
+                    .setServiceName("http")
+                    .setServiceContext(
+                        ServiceContext.newBuilder()
+                            .setWebServiceContext(
+                                WebServiceContext.newBuilder()
+                                    .setSoftware(Software.newBuilder().setName("jenkins"))))
+                    .build()))
+        .isEqualTo("jenkins");
+  }
+
+  @Test
+  public void getServiceName_whenWebServiceNoContext_returnsServiceName() {
+    assertThat(
+            NetworkServiceUtils.getWebServiceName(
+                NetworkService.newBuilder()
+                    .setNetworkEndpoint(forIpAndPort("127.0.0.1", 8080))
+                    .setServiceName("http")
+                    .setSoftware(Software.newBuilder().setName("nothttp"))
+                    .build()))
+        .isEqualTo("http");
   }
 
   @Test
@@ -260,5 +354,50 @@ public final class NetworkServiceUtilsTest {
                             WebServiceContext.newBuilder().setApplicationRoot("test_root")))
                 .build()))
         .isEqualTo("https://127.0.0.1/test_root/");
+  }
+
+  @Test
+  public void buildWebApplicationRootUrl_whenNotWebService_returnsHttpUrl() {
+    assertThat(
+        NetworkServiceUtils.buildWebApplicationRootUrl(
+            NetworkService.newBuilder()
+                .setNetworkEndpoint(forIpAndPort("127.0.0.1", 2121))
+                .setServiceName("unknown")
+                .build()))
+        .isEqualTo("http://127.0.0.1:2121/");
+  }
+
+  @Test
+  public void buildUriNetworkService_returnsNetworkService() throws IOException {
+
+    URL url = new URL("https://localhost/function1");
+    String hostname = url.getHost();
+    String ipaddress = InetAddress.getByName(hostname).getHostAddress();
+    InetAddress inetAddress = InetAddress.getByName(url.getHost());
+    AddressFamily addressFamily =
+        inetAddress instanceof Inet4Address ? AddressFamily.IPV4 : AddressFamily.IPV6;
+
+    NetworkEndpoint networkEndpoint =
+        NetworkEndpoint.newBuilder()
+            .setType(NetworkEndpoint.Type.IP_HOSTNAME_PORT)
+            .setIpAddress(
+                IpAddress.newBuilder().setAddressFamily(addressFamily).setAddress(ipaddress))
+            .setPort(Port.newBuilder().setPortNumber(443))
+            .setHostname(Hostname.newBuilder().setName("localhost"))
+            .build();
+
+    NetworkService networkService =
+        NetworkService.newBuilder()
+            .setNetworkEndpoint(networkEndpoint)
+            .setTransportProtocol(TransportProtocol.TCP)
+            .setServiceName("https")
+            .setServiceContext(
+                ServiceContext.newBuilder()
+                    .setWebServiceContext(
+                        WebServiceContext.newBuilder().setApplicationRoot("/function1")))
+            .build();
+
+    assertThat(NetworkServiceUtils.buildUriNetworkService("https://localhost/function1"))
+        .isEqualTo(networkService);
   }
 }

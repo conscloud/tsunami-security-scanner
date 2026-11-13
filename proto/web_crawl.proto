@@ -24,7 +24,7 @@ import "network.proto";
 option java_multiple_files = true;
 option java_outer_classname = "WebCrawlProtos";
 option java_package = "com.google.tsunami.proto";
-option go_package = "github.com/google/tsunami-security-scanner/proto";
+option go_package = "github.com/google/tsunami-security-scanner/proto/go/web_crawl_go_proto";
 
 // Next ID: 7
 message CrawlConfig {
@@ -76,6 +76,19 @@ message CrawlTarget {
   bytes http_request_body = 3;
 }
 
+// Represents an HTTP header.
+message HttpHeader {
+  string key = 1;
+  string value = 2;
+}
+
+// The type of content stored in the CrawlResult.
+enum CrawlContentType {
+  CONTENT_TYPE_UNSPECIFIED = 0;
+  CONTENT_TYPE_RAW = 1;
+  CONTENT_TYPE_HASH = 2;
+}
+
 message CrawlResult {
   // The target visited by the crawler.
   CrawlTarget crawl_target = 1;
@@ -91,4 +104,12 @@ message CrawlResult {
 
   // The content of the resource served at the crawl target.
   bytes content = 5;
+
+  // Http headers of the response
+  repeated HttpHeader response_headers = 6;
+
+  // The type of content stored in the crawl_results. By default, the whole
+  // response body is stored (RAW). But some configuration can request storing
+  // only a hash of the response body (HASH).
+  CrawlContentType crawl_content_type = 7;
 }

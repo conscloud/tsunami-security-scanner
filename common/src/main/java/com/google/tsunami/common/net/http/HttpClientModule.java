@@ -17,6 +17,7 @@ package com.google.tsunami.common.net.http;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Strings.isNullOrEmpty;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import com.google.inject.AbstractModule;
@@ -57,6 +58,8 @@ public final class HttpClientModule extends AbstractModule {
           return new X509Certificate[0];
         }
       };
+  // Maximum number of requests for each host (URL's host name) to execute concurrently.
+  private static final int OKHTTPCLIENT_MAX_REQUESTS_PER_HOST = 5;
 
   // Maximum number of idle connections to each to keep in the pool.
   private final int connectionPoolMaxIdle;
@@ -64,8 +67,6 @@ public final class HttpClientModule extends AbstractModule {
   private final Duration connectionPoolKeepAliveDuration;
   // Maximum number of requests to execute concurrently.
   private final int maxRequests;
-  // Maximum number of requests for each host (URL's host name) to execute concurrently.
-  private final int maxRequestsPerHost;
   // Whether or not to follow redirect from server.
   private final boolean followRedirects;
   // A log ID to print in front of the logs.
@@ -76,7 +77,6 @@ public final class HttpClientModule extends AbstractModule {
     this.connectionPoolMaxIdle = builder.connectionPoolMaxIdle;
     this.connectionPoolKeepAliveDuration = builder.connectionPoolKeepAliveDuration;
     this.maxRequests = builder.maxRequests;
-    this.maxRequestsPerHost = builder.maxRequestsPerHost;
     this.followRedirects = builder.followRedirects;
     this.logId = builder.logId;
   }
@@ -93,7 +93,7 @@ public final class HttpClientModule extends AbstractModule {
   Dispatcher provideDispatcher() {
     Dispatcher dispatcher = new Dispatcher();
     dispatcher.setMaxRequests(maxRequests);
-    dispatcher.setMaxRequestsPerHost(maxRequestsPerHost);
+    dispatcher.setMaxRequestsPerHost(OKHTTPCLIENT_MAX_REQUESTS_PER_HOST);
     return dispatcher;
   }
 
@@ -115,16 +115,13 @@ public final class HttpClientModule extends AbstractModule {
       Dispatcher dispatcher,
       @TrustAllCertsSocketFactory SSLSocketFactory trustAllCertsSocketFactory,
       @TrustAllCertificates boolean trustAllCertificates,
-      @CallTimeoutSeconds int callTimeoutSeconds,
-      @ConnectTimeoutSeconds int connectTimeoutSeconds,
-      @ReadTimeoutSeconds int readTimeoutSeconds,
-      @WriteTimeoutSeconds int writeTimeoutSeconds) {
+      @ConnectTimeoutSeconds int connectTimeoutSeconds) {
     OkHttpClient.Builder clientBuilder =
         new OkHttpClient.Builder()
-            .callTimeout(Duration.ofSeconds(callTimeoutSeconds))
+            .callTimeout(Duration.ofSeconds(connectTimeoutSeconds))
             .connectTimeout(Duration.ofSeconds(connectTimeoutSeconds))
-            .readTimeout(Duration.ofSeconds(readTimeoutSeconds))
-            .writeTimeout(Duration.ofSeconds(writeTimeoutSeconds))
+            .readTimeout(Duration.ofSeconds(connectTimeoutSeconds))
+            .writeTimeout(Duration.ofSeconds(connectTimeoutSeconds))
             .connectionPool(connectionPool)
             .dispatcher(dispatcher)
             .followRedirects(followRedirects);
@@ -134,6 +131,19 @@ public final class HttpClientModule extends AbstractModule {
           .hostnameVerifier((hostname, session) -> true);
     }
     return clientBuilder.build();
+  }
+
+  @Provides
+  @Singleton
+  HttpClient provideOkHttpHttpClient(
+      OkHttpClient okHttpClient,
+      @TrustAllCertificates boolean trustAllCertificates,
+      ConnectionFactory connectionFactory,
+      @LogId String logId,
+      @ConnectTimeout Duration connectTimeout,
+      @UserAgent String userAgent) {
+    return new OkHttpHttpClient(
+        okHttpClient, trustAllCertificates, connectionFactory, logId, connectTimeout, userAgent);
   }
 
   @Provides
@@ -161,13 +171,25 @@ public final class HttpClientModule extends AbstractModule {
     if (httpClientConfigProperties.trustAllCertificates != null) {
       return httpClientConfigProperties.trustAllCertificates;
     }
-    return false;
+    return true;
   }
 
   @Provides
   @LogId
   String provideLogid() {
     return logId;
+  }
+
+  @Provides
+  @FollowRedirects
+  boolean provideFollowRedirects() {
+    return followRedirects;
+  }
+
+  @Provides
+  @MaxRequests
+  int provideMaxRequests() {
+    return maxRequests;
   }
 
   @Provides
@@ -203,6 +225,12 @@ public final class HttpClientModule extends AbstractModule {
   }
 
   @Provides
+  @ConnectTimeout
+  Duration provideConnectTimeout(@ConnectTimeoutSeconds int connectionTimeoutSeconds) {
+    return Duration.ofSeconds(connectionTimeoutSeconds);
+  }
+
+  @Provides
   @ReadTimeoutSeconds
   int provideReadTimeoutSeconds(
       HttpClientCliOptions httpClientCliOptions,
@@ -234,6 +262,15 @@ public final class HttpClientModule extends AbstractModule {
     return 10;
   }
 
+  @Provides
+  @UserAgent
+  String provideUserAgent(HttpClientCliOptions httpClientCliOptions) {
+    if (!isNullOrEmpty(httpClientCliOptions.userAgent)) {
+      return httpClientCliOptions.userAgent;
+    }
+    return HttpClient.TSUNAMI_USER_AGENT;
+  }
+
   @Qualifier
   @Retention(RetentionPolicy.RUNTIME)
   @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
@@ -262,6 +299,11 @@ public final class HttpClientModule extends AbstractModule {
   @Qualifier
   @Retention(RetentionPolicy.RUNTIME)
   @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
+  @interface ConnectTimeout {}
+
+  @Qualifier
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
   @interface ReadTimeoutSeconds {}
 
   @Qualifier
@@ -269,20 +311,33 @@ public final class HttpClientModule extends AbstractModule {
   @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
   @interface WriteTimeoutSeconds {}
 
+  @Qualifier
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
+  @interface FollowRedirects {}
+
+  @Qualifier
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
+  @interface MaxRequests {}
+
+  @Qualifier
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.FIELD})
+  @interface UserAgent {}
+
   /** Builder for {@link HttpClientModule}. */
   public static final class Builder {
     private static final int DEFAULT_CONNECTION_POOL_MAX_IDLE = 5;
     private static final Duration DEFAULT_CONNECTION_POOL_KEEP_ALIVE_DURATION =
         Duration.ofMinutes(5);
     private static final int DEFAULT_MAX_REQUESTS = 64;
-    private static final int DEFAULT_MAX_REQUESTS_PER_HOST = 5;
     private static final boolean DEFAULT_FOLLOW_REDIRECTS = true;
     private static final String DEFAULT_LOG_ID = "";
 
     private int connectionPoolMaxIdle = DEFAULT_CONNECTION_POOL_MAX_IDLE;
     private Duration connectionPoolKeepAliveDuration = DEFAULT_CONNECTION_POOL_KEEP_ALIVE_DURATION;
     private int maxRequests = DEFAULT_MAX_REQUESTS;
-    private int maxRequestsPerHost = DEFAULT_MAX_REQUESTS_PER_HOST;
     private boolean followRedirects = DEFAULT_FOLLOW_REDIRECTS;
     private String logId = DEFAULT_LOG_ID;
 
@@ -320,18 +375,6 @@ public final class HttpClientModule extends AbstractModule {
     public Builder setMaxRequests(int maxRequests) {
       checkArgument(maxRequests > 0);
       this.maxRequests = maxRequests;
-      return this;
-    }
-
-    /**
-     * Sets the maximum number of requests for each host (URL's host name) to execute concurrently.
-     *
-     * @param maxRequestsPerHost the maximum number of concurrent requests per host target.
-     * @return the {@link Builder} instance itself.
-     */
-    public Builder setMaxRequestsPerHost(int maxRequestsPerHost) {
-      checkArgument(maxRequestsPerHost > 0);
-      this.maxRequestsPerHost = maxRequestsPerHost;
       return this;
     }
 

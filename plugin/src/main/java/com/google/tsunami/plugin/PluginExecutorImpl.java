@@ -22,25 +22,24 @@ import com.google.common.base.Stopwatch;
 import com.google.common.flogger.GoogleLogger;
 import com.google.common.util.concurrent.FluentFuture;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.tsunami.plugin.PluginExecutionResult.ExecutionStatus;
+import java.time.Duration;
 import javax.inject.Inject;
 
 class PluginExecutorImpl implements PluginExecutor {
   private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
-
-  // TODO(b/145315535): use ListeningScheduledExecutorService so that deadline can be enforced.
-  private final ListeningExecutorService pluginExecutionThreadPool;
+  private final ListeningScheduledExecutorService pluginExecutionThreadPool;
   private final Stopwatch executionStopwatch;
 
   @Inject
   PluginExecutorImpl(
-      @PluginExecutionThreadPool ListeningExecutorService pluginExecutionThreadPool) {
+      @PluginExecutionThreadPool ListeningScheduledExecutorService pluginExecutionThreadPool) {
     this(pluginExecutionThreadPool, Stopwatch.createUnstarted());
   }
 
   PluginExecutorImpl(
-      ListeningExecutorService pluginExecutionThreadPool, Stopwatch executionStopwatch) {
+      ListeningScheduledExecutorService pluginExecutionThreadPool, Stopwatch executionStopwatch) {
     this.pluginExecutionThreadPool = checkNotNull(pluginExecutionThreadPool);
     this.executionStopwatch = checkNotNull(executionStopwatch);
   }
@@ -55,6 +54,8 @@ class PluginExecutorImpl implements PluginExecutor {
                   executionStopwatch.start();
                   return executorConfig.pluginExecutionLogic().call();
                 }))
+        // Terminate plugin if it runs over 1 hour.
+        .withTimeout(Duration.ofHours(1), pluginExecutionThreadPool)
         // If execution succeeded, build successful execution result.
         .transform(resultData -> buildSucceededResult(resultData, executorConfig), directExecutor())
         // If execution failed, build failed execution result.
@@ -69,6 +70,10 @@ class PluginExecutorImpl implements PluginExecutor {
     if (executionStopwatch.isRunning()) {
       executionStopwatch.stop();
     }
+    logger.atInfo().log(
+        "%s plugin execution finished in %d (ms)",
+        executorConfig.matchedPlugin().pluginDefinition().name(),
+        executionStopwatch.elapsed().toMillis());
     return PluginExecutionResult.<T>builder()
         .setExecutionStatus(ExecutionStatus.SUCCEEDED)
         .setResultData(resultData)

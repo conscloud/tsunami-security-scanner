@@ -19,6 +19,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
@@ -26,7 +27,10 @@ import com.google.tsunami.common.cli.CliOptionsModule;
 import com.google.tsunami.common.config.ConfigModule;
 import com.google.tsunami.common.config.TsunamiConfig;
 import com.google.tsunami.common.data.NetworkEndpointUtils;
+import com.google.tsunami.common.net.http.HttpClientModule;
 import com.google.tsunami.common.time.testing.FakeUtcClockModule;
+import com.google.tsunami.main.cli.server.RemoteServerLoaderModule;
+import com.google.tsunami.plugin.payload.PayloadGeneratorModule;
 import com.google.tsunami.plugin.testing.FailedVulnDetectorBootstrapModule;
 import com.google.tsunami.plugin.testing.FakePluginExecutionModule;
 import com.google.tsunami.plugin.testing.FakePortScanner;
@@ -38,22 +42,38 @@ import com.google.tsunami.plugin.testing.FakeVulnDetector;
 import com.google.tsunami.plugin.testing.FakeVulnDetector2;
 import com.google.tsunami.plugin.testing.FakeVulnDetectorBootstrapModule;
 import com.google.tsunami.plugin.testing.FakeVulnDetectorBootstrapModule2;
+import com.google.tsunami.proto.AddressFamily;
 import com.google.tsunami.proto.DetectionReport;
+import com.google.tsunami.proto.Hostname;
+import com.google.tsunami.proto.IpAddress;
+import com.google.tsunami.proto.NetworkEndpoint;
 import com.google.tsunami.proto.NetworkService;
+import com.google.tsunami.proto.Port;
 import com.google.tsunami.proto.ReconnaissanceReport;
 import com.google.tsunami.proto.ScanFinding;
 import com.google.tsunami.proto.ScanResults;
 import com.google.tsunami.proto.ScanStatus;
+import com.google.tsunami.proto.ServiceContext;
 import com.google.tsunami.proto.TargetInfo;
+import com.google.tsunami.proto.TransportProtocol;
+import com.google.tsunami.proto.WebServiceContext;
 import com.google.tsunami.workflow.ScanningWorkflowException;
 import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ScanResult;
+import java.io.File;
 import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Stream;
 import javax.inject.Inject;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 import org.mockito.ArgumentCaptor;
@@ -67,8 +87,10 @@ import org.mockito.junit.MockitoRule;
 public final class TsunamiCliTest {
   private static final String IP_TARGET = "127.0.0.1";
   private static final String HOSTNAME_TARGET = "localhost";
+  private static final String URI_TARGET = "https://localhost/function1";
 
   @Rule public MockitoRule mockitoRule = MockitoJUnit.rule();
+  @Rule public TemporaryFolder tempFolder = new TemporaryFolder();
 
   @Mock ScanResultsArchiver scanResultsArchiver;
 
@@ -84,6 +106,8 @@ public final class TsunamiCliTest {
                 @Override
                 protected void configure() {
                   bind(ScanResultsArchiver.class).toInstance(scanResultsArchiver);
+                  install(new HttpClientModule.Builder().build());
+                  install(new PayloadGeneratorModule(new SecureRandom()));
                   install(new ConfigModule(scanResult, TsunamiConfig.fromYamlData(rawConfigData)));
                   install(new CliOptionsModule(scanResult, "TsunamiCliTest", args));
                   install(new FakeUtcClockModule());
@@ -93,6 +117,7 @@ public final class TsunamiCliTest {
                   install(new FakeServiceFingerprinterBootstrapModule());
                   install(new FakeVulnDetectorBootstrapModule());
                   install(new FakeVulnDetectorBootstrapModule2());
+                  install(new RemoteServerLoaderModule(ImmutableList.of()));
                 }
               })
           .injectMembers(this);
@@ -175,6 +200,49 @@ public final class TsunamiCliTest {
   }
 
   @Test
+  public void run_whenUriTarget_generatesCorrectResult()
+      throws InterruptedException, ExecutionException, IOException {
+
+    boolean scanSucceeded = runCli(ImmutableMap.of(), "--uri-target=" + URI_TARGET);
+    assertThat(scanSucceeded).isTrue();
+
+    URL url = new URL(URI_TARGET);
+    String hostname = url.getHost();
+    String ipaddress = InetAddress.getByName(hostname).getHostAddress();
+    InetAddress inetAddress = InetAddress.getByName(url.getHost());
+    AddressFamily addressFamily =
+        inetAddress instanceof Inet4Address ? AddressFamily.IPV4 : AddressFamily.IPV6;
+
+    NetworkEndpoint networkEndpoint =
+        NetworkEndpoint.newBuilder()
+            .setType(NetworkEndpoint.Type.IP_HOSTNAME_PORT)
+            .setHostname(Hostname.newBuilder().setName("localhost"))
+            .setPort(Port.newBuilder().setPortNumber(443))
+            .setIpAddress(
+                IpAddress.newBuilder().setAddressFamily(addressFamily).setAddress(ipaddress))
+            .build();
+
+    verify(scanResultsArchiver, times(1)).archive(scanResultsCaptor.capture());
+    ScanResults storedScanResult = scanResultsCaptor.getValue();
+    assertThat(storedScanResult.getScanStatus()).isEqualTo(ScanStatus.SUCCEEDED);
+    assertThat(storedScanResult.getReconnaissanceReport())
+        .isEqualTo(
+            ReconnaissanceReport.newBuilder()
+                .setTargetInfo(TargetInfo.newBuilder().addNetworkEndpoints(networkEndpoint))
+                .addNetworkServices(
+                    NetworkService.newBuilder()
+                        .setNetworkEndpoint(networkEndpoint)
+                        .setTransportProtocol(TransportProtocol.TCP)
+                        .setServiceName("https")
+                        .setServiceContext(
+                            ServiceContext.newBuilder()
+                                .setWebServiceContext(
+                                    WebServiceContext.newBuilder()
+                                        .setApplicationRoot(url.getPath()))))
+                .build());
+  }
+
+  @Test
   public void run_whenIpAndHostnameTarget_generatesCorrectResult()
       throws InterruptedException, ExecutionException, IOException {
 
@@ -213,6 +281,8 @@ public final class TsunamiCliTest {
                 @Override
                 protected void configure() {
                   bind(ScanResultsArchiver.class).toInstance(scanResultsArchiver);
+                  install(new HttpClientModule.Builder().build());
+                  install(new PayloadGeneratorModule(new SecureRandom()));
                   install(
                       new ConfigModule(scanResult, TsunamiConfig.fromYamlData(ImmutableMap.of())));
                   install(
@@ -226,6 +296,7 @@ public final class TsunamiCliTest {
                   install(new FakePluginExecutionModule());
                   install(new FakePortScannerBootstrapModule());
                   install(new FailedVulnDetectorBootstrapModule());
+                  install(new RemoteServerLoaderModule(ImmutableList.of()));
                 }
               })
           .injectMembers(this);
@@ -239,6 +310,39 @@ public final class TsunamiCliTest {
       assertThat(storedScanResult.getScanStatus()).isEqualTo(ScanStatus.FAILED);
       assertThat(storedScanResult.getStatusMessage()).isEqualTo("All VulnDetectors failed.");
     }
+  }
+
+  @Test
+  public void run_whenAdvisoryMode_generatesAdvisories()
+      throws InterruptedException, ExecutionException, ScanningWorkflowException, IOException {
+    File tempFile = tempFolder.newFile("advisories.csv");
+    Path tempPath = tempFile.toPath();
+    boolean scanSucceeded = runCli(ImmutableMap.of(), "--dump-advisories=" + tempPath.toString());
+
+    String advisories = Files.readString(tempPath);
+    String expectedAdvisories =
+        """
+        vulnerabilities {
+          main_id {
+            publisher: "GOOGLE"
+            value: "FakeVuln1"
+          }
+          severity: CRITICAL
+          title: "FakeTitle1"
+          description: "FakeDescription1"
+        }
+        vulnerabilities {
+          main_id {
+            publisher: "GOOGLE"
+            value: "FakeVuln2"
+          }
+          severity: MEDIUM
+          title: "FakeTitle2"
+          description: "FakeDescription2"
+        }
+        """;
+    assertThat(scanSucceeded).isTrue();
+    assertThat(advisories).isEqualTo(expectedAdvisories);
   }
 
   private static ScanFinding buildScanFindingFromDetectionReport(DetectionReport detectionReport) {

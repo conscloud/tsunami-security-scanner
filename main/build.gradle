@@ -1,24 +1,36 @@
 plugins {
     id 'application'
-    id 'com.github.johnrengelman.shadow'
+    id 'com.gradleup.shadow' version "8.3.6"
 }
 
 description = 'Tsunami: main'
 
 dependencies {
-    compile project(':tsunami-common')
-    compile project(':tsunami-plugin')
-    compile project(':tsunami-proto')
-    compile project(':tsunami-workflow')
-    compile deps.flogger
-    compile deps.flogger_google_ext
-    compile deps.guava
-    compile deps.jsoup
-    runtime deps.jaxb_runtime
+    implementation project(':tsunami-common')
+    implementation project(':tsunami-plugin')
+    implementation project(':tsunami-proto')
+    implementation project(':tsunami-workflow')
 
-    testCompile deps.junit
-    testCompile deps.mockito
-    testCompile deps.truth, deps.truth8, deps.truth_protobuf
+    implementation "com.beust:jcommander:1.48"
+    implementation "com.doyensec:libajp:1.0.0"
+    implementation "com.google.cloud:google-cloud-storage:1.103.1"
+    implementation "com.google.flogger:flogger:0.9"
+    implementation "com.google.flogger:google-extensions:0.9"
+    implementation "com.google.guava:guava:33.0.0-jre"
+    implementation "com.google.inject:guice:6.0.0"
+    implementation "com.google.protobuf:protobuf-java:3.25.5"
+    implementation "io.github.classgraph:classgraph:4.8.65"
+    implementation "io.grpc:grpc-netty:1.60.0"
+    implementation "javax.inject:javax.inject:1"
+    implementation "org.jsoup:jsoup:1.9.2"
+
+    runtimeOnly "org.glassfish.jaxb:jaxb-runtime:2.3.1"
+
+    testImplementation "com.google.truth:truth:1.4.4"
+    testImplementation "com.google.truth.extensions:truth-java8-extension:1.4.4"
+    testImplementation "com.google.truth.extensions:truth-proto-extension:1.4.4"
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.mockito:mockito-core:5.18.0"
 }
 
 application {
@@ -26,6 +38,30 @@ application {
 }
 
 shadowJar {
-    classifier = 'cli'
     exclude '*.proto'
+}
+
+tasks.named("distZip") {
+    dependsOn(":tsunami-main:shadowJar")
+}
+
+tasks.named("distTar") {
+    dependsOn(":tsunami-main:shadowJar")
+}
+
+tasks.named("startScripts") {
+    dependsOn(":tsunami-main:shadowJar")
+}
+
+tasks.named("startShadowScripts") {
+    dependsOn(":tsunami-main:jar")
+}
+
+tasks.named("compileJava") {
+    dependsOn(":tsunami-plugin:shadowJar")
+}
+
+tasks.named('compileJava') {
+    dependsOn(':tsunami-proto:shadowJar')
+    dependsOn(':tsunami-workflow:shadowJar')
 }

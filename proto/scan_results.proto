@@ -29,7 +29,7 @@ import "vulnerability.proto";
 option java_multiple_files = true;
 option java_outer_classname = "ScanResultsProtos";
 option java_package = "com.google.tsunami.proto";
-option go_package = "github.com/google/tsunami-security-scanner/proto";
+option go_package = "github.com/google/tsunami-security-scanner/proto/go/scan_results_go_proto";
 
 // Execution status of the scan.
 // NEXT ID: 5
@@ -59,13 +59,18 @@ message ScanFinding {
 }
 
 // Full scanning results.
-// NEXT ID: 8
+// NEXT ID: 9
 message ScanResults {
   // Status of this scan.
   ScanStatus scan_status = 1;
 
   // Detailed message for the scan status.
   string status_message = 6;
+
+  // Reports whether the target was alive during the scan.
+  // A target is considered alive if at least one network service was identified
+  // or at least one vulnerability was detected.
+  bool target_alive = 8;
 
   // All findings from this scan.
   repeated ScanFinding scan_findings = 2;
